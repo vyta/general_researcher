@@ -30,15 +30,22 @@ class AzureEvaluators:
         import re
 
         endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
-        m = re.match(r"(https://[^/]+\.services\.ai\.azure\.com)", endpoint)
+        # Extract resource name: https://{name}.services.ai.azure.com/...
+        m = re.match(r"https://([^.]+)\.", endpoint)
         if not m:
-            raise ValueError(f"Cannot extract resource host from AZURE_AI_PROJECT_ENDPOINT: {endpoint}")
+            raise ValueError(f"Cannot extract resource name from AZURE_AI_PROJECT_ENDPOINT: {endpoint}")
+        resource_name = m.group(1)
+
+        cred = credential or DefaultAzureCredential()
+        # Get a token and use it as api_key — the SDK's TypedDict validator
+        # does strict type checking and credential objects can fail validation.
+        token = cred.get_token("https://cognitiveservices.azure.com/.default").token
 
         model_config = {
-            "azure_endpoint": m.group(1),
+            "azure_endpoint": f"https://{resource_name}.openai.azure.com/",
             "azure_deployment": os.environ.get("MODEL_DEPLOYMENT_NAME_FAST",
                                                os.environ.get("MODEL_DEPLOYMENT_NAME", "gpt-4o")),
-            "credential": credential or DefaultAzureCredential(),
+            "api_key": token,
         }
         return cls(model_config)
 

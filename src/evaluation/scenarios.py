@@ -26,6 +26,11 @@ def test_ai_legislation(s):
     s.then("the answer should be at least 200 characters", 200)
     s.then("sources should include", "GovInfo")
     s.then("documents retrieved should be at least", 3)
+    # Process assertions (trace-based)
+    s.then("the agent should have called", "search_govinfo")
+    s.then("no tool calls should have failed")
+    s.then("total tool calls should be at least", 1)
+    # Azure AI evaluators
     s.then("azure relevance score")
     s.then("azure coherence score")
     s.then("azure groundedness score")
@@ -59,6 +64,10 @@ def test_epa_water(s):
     s.then("the answer should be at least 150 characters", 150)
     s.then("sources should include", "Federal Register")
     s.then("documents retrieved should be at least", 3)
+    # Process assertions
+    s.then("the agent should have called", "search_federal_register")
+    s.then("no tool calls should have failed")
+    # Azure AI evaluators
     s.then("azure relevance score")
     s.then("azure coherence score")
     s.then("azure groundedness score")

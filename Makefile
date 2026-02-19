@@ -37,7 +37,7 @@ EVAL_ARCHITECTURES ?= single_agent
 .PHONY: eval
 eval:
 	@echo "Running BDD evaluation..."
-	@nerdctl run --rm \
+	@nerdctl run --rm -it \
 		-v $(WORKSPACE):/workspace \
 		-w /workspace \
 		--env-file .env \

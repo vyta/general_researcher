@@ -28,6 +28,7 @@ class ResearchOutput:
     documents_retrieved: int
     citations_count: int
     sources_used: List[str]
+    spans: List[Any] = field(default_factory=list)
 
 
 class EvalRunner:
@@ -59,6 +60,12 @@ class EvalRunner:
 
         logger.info("Running scenario: %s (%s)", scenario.name, scenario.scenario_id)
 
+        # Clear span capture before running
+        from utils.tracing import get_span_capture
+        capture = get_span_capture()
+        if capture:
+            capture.clear()
+
         # Run the research pipeline
         start = time.time()
         try:
@@ -76,6 +83,9 @@ class EvalRunner:
                 error=str(e),
             )
 
+        # Collect captured spans
+        captured_spans = list(capture.get_finished_spans()) if capture else []
+
         # Normalize output
         citations_count = len(result.citations) if hasattr(result, 'citations') else _count_citations(result.answer)
         sources_used = list(result.sources_checked) if hasattr(result, 'sources_checked') else []
@@ -86,6 +96,7 @@ class EvalRunner:
             documents_retrieved=result.documents_retrieved if hasattr(result, 'documents_retrieved') else 0,
             citations_count=citations_count,
             sources_used=sources_used,
+            spans=captured_spans,
         )
 
         # Evaluate Then assertions

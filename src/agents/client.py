@@ -14,6 +14,7 @@ import os
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Optional, List
 
@@ -24,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 API_VERSION = "2025-05-15-preview"
 RESPONSES_API_VERSION = "preview"
+
+
+class _nullcontext:
+    """Minimal no-op context manager for when tracer is None."""
+    def __enter__(self): return None
+    def __exit__(self, *args): pass
 
 
 @dataclass
@@ -192,13 +199,16 @@ class FoundryAgentManager:
 
         Uses the agent's stored instructions as a system message and
         passes tools for function calling. Handles the tool-call loop.
+        Emits OpenTelemetry spans for agent runs and tool calls.
         """
         from openai.types.responses import ResponseFunctionToolCall, ResponseOutputMessage
+        from utils.tracing import get_tracer
+
+        tracer = get_tracer()
 
         # Look up agent info
         info = self._agent_info.get(agent_id)
         if not info:
-            # Parse agent_id ("name:version") as fallback
             if ":" in agent_id:
                 agent_name, _ = agent_id.rsplit(":", 1)
             else:
@@ -235,71 +245,112 @@ class FoundryAgentManager:
             input_messages.append({"role": "developer", "content": info.instructions})
         input_messages.append({"role": "user", "content": user_message})
 
-        # Initial Responses API call
-        create_kwargs = {
-            "model": info.model,
-            "input": input_messages,
-        }
-        if response_tools:
-            create_kwargs["tools"] = response_tools
+        # Wrap entire agent run in a span
+        span_ctx = tracer.start_as_current_span(
+            f"agent.run.{info.name}",
+            attributes={
+                "agent.name": info.name,
+                "agent.model": info.model,
+                "agent.id": info.id,
+                "input.length": len(user_message),
+            },
+        ) if tracer else _nullcontext()
 
-        response = self.openai_client.responses.create(**create_kwargs)
-        logger.info("Response created: id=%s", response.id)
+        with span_ctx as agent_span:
+            # Initial Responses API call
+            create_kwargs = {
+                "model": info.model,
+                "input": input_messages,
+            }
+            if response_tools:
+                create_kwargs["tools"] = response_tools
 
-        # Tool-call loop
-        max_rounds = 10
-        for round_num in range(max_rounds):
-            fn_calls = [
-                item for item in response.output
-                if isinstance(item, ResponseFunctionToolCall)
-            ]
-            if not fn_calls:
-                break
+            response = self.openai_client.responses.create(**create_kwargs)
+            logger.info("Response created: id=%s", response.id)
 
-            logger.info("Round %d: %d function call(s)", round_num + 1, len(fn_calls))
-            tool_results = self._execute_tool_calls(fn_calls, tool_set)
+            # Tool-call loop
+            max_rounds = 10
+            total_tool_calls = 0
+            for round_num in range(max_rounds):
+                fn_calls = [
+                    item for item in response.output
+                    if isinstance(item, ResponseFunctionToolCall)
+                ]
+                if not fn_calls:
+                    break
 
-            response = self.openai_client.responses.create(
-                model=info.model,
-                input=tool_results,
-                previous_response_id=response.id,
-                tools=response_tools or [],
-            )
+                logger.info("Round %d: %d function call(s)", round_num + 1, len(fn_calls))
+                total_tool_calls += len(fn_calls)
+                tool_results = self._execute_tool_calls(fn_calls, tool_set, tracer)
 
-        # Extract text from final response
-        response_text = ""
-        for item in response.output:
-            if isinstance(item, ResponseOutputMessage):
-                for content in item.content:
-                    if hasattr(content, "text"):
-                        response_text += content.text
+                response = self.openai_client.responses.create(
+                    model=info.model,
+                    input=tool_results,
+                    previous_response_id=response.id,
+                    tools=response_tools or [],
+                )
 
-        logger.info("Run complete: %d chars", len(response_text))
-        logger.debug("Response preview: %s", response_text[:500])
+            # Extract text from final response
+            response_text = ""
+            for item in response.output:
+                if isinstance(item, ResponseOutputMessage):
+                    for content in item.content:
+                        if hasattr(content, "text"):
+                            response_text += content.text
 
-        return RunResult(text=response_text)
+            if agent_span:
+                agent_span.set_attribute("output.length", len(response_text))
+                agent_span.set_attribute("tool_calls.total", total_tool_calls)
+                agent_span.set_attribute("tool_call_rounds", round_num + 1 if fn_calls or round_num > 0 else 0)
 
-    def _execute_tool_calls(self, fn_calls, tool_set) -> list:
+            logger.info("Run complete: %d chars, %d tool calls", len(response_text), total_tool_calls)
+            logger.debug("Response preview: %s", response_text[:500])
+
+            return RunResult(text=response_text)
+
+    def _execute_tool_calls(self, fn_calls, tool_set, tracer=None) -> list:
         """Execute function tool calls locally and return output dicts."""
         results = []
         for fc in fn_calls:
             logger.info("  Executing: %s(%s)", fc.name, fc.arguments[:200] if fc.arguments else "")
-            try:
-                args = json.loads(fc.arguments) if fc.arguments else {}
-                output = self._call_tool_function(tool_set, fc.name, args)
-                logger.info("  %s returned %d chars", fc.name, len(output) if isinstance(output, str) else 0)
-                results.append({
-                    "type": "function_call_output",
-                    "call_id": fc.call_id,
-                    "output": output if isinstance(output, str) else json.dumps(output),
-                })
-            except Exception as e:
-                logger.error("  %s FAILED: %s", fc.name, e)
-                results.append({
-                    "type": "function_call_output",
-                    "call_id": fc.call_id,
-                    "output": json.dumps({"error": str(e)}),
-                })
+
+            span_ctx = tracer.start_as_current_span(
+                f"tool.call.{fc.name}",
+                attributes={
+                    "tool.name": fc.name,
+                    "tool.arguments": fc.arguments[:500] if fc.arguments else "",
+                },
+            ) if tracer else _nullcontext()
+
+            with span_ctx as tool_span:
+                start = time.time()
+                try:
+                    args = json.loads(fc.arguments) if fc.arguments else {}
+                    output = self._call_tool_function(tool_set, fc.name, args)
+                    elapsed = time.time() - start
+                    output_str = output if isinstance(output, str) else json.dumps(output)
+                    logger.info("  %s returned %d chars in %.1fs", fc.name, len(output_str), elapsed)
+                    if tool_span:
+                        tool_span.set_attribute("tool.status", "success")
+                        tool_span.set_attribute("tool.output_length", len(output_str))
+                        tool_span.set_attribute("tool.duration_ms", int(elapsed * 1000))
+                    results.append({
+                        "type": "function_call_output",
+                        "call_id": fc.call_id,
+                        "output": output_str,
+                    })
+                except Exception as e:
+                    elapsed = time.time() - start
+                    logger.error("  %s FAILED: %s", fc.name, e)
+                    if tool_span:
+                        tool_span.set_attribute("tool.status", "error")
+                        tool_span.set_attribute("tool.error", str(e))
+                        tool_span.set_attribute("tool.duration_ms", int(elapsed * 1000))
+                    results.append({
+                        "type": "function_call_output",
+                        "call_id": fc.call_id,
+                        "output": json.dumps({"error": str(e)}),
+                    })
         return results
 
     def _call_tool_function(self, tool_set, fn_name: str, args: dict) -> str:

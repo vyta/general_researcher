@@ -277,3 +277,93 @@ def _azure_fluency(assertion, args, output, _, azure_evaluators) -> StepResult:
         detail=result["detail"],
         is_llm_judged=True,
     )
+
+
+# ── Process steps (trace-based) ──────────────────────────────────────
+
+def _get_tool_spans(output) -> list:
+    """Extract tool call spans from captured OTel spans."""
+    return [s for s in getattr(output, 'spans', []) if s.name.startswith("tool.call.")]
+
+
+def _get_agent_spans(output) -> list:
+    """Extract agent run spans from captured OTel spans."""
+    return [s for s in getattr(output, 'spans', []) if s.name.startswith("agent.run.")]
+
+
+@step("the agent should have called")
+def _agent_called_tool(assertion, args, output, _, __) -> StepResult:
+    tool_name = str(args[0]) if args else ""
+    tool_spans = _get_tool_spans(output)
+    called_tools = [s.attributes.get("tool.name", "") for s in tool_spans]
+    found = tool_name in called_tools
+    return StepResult(
+        step_text=f"the agent should have called \"{tool_name}\"",
+        score=1.0 if found else 0.0,
+        metric="coverage",
+        detail="" if found else f"tools called: {called_tools}",
+    )
+
+
+@step("total tool calls should be at most")
+def _max_tool_calls(assertion, args, output, _, __) -> StepResult:
+    max_calls = int(args[0]) if args else _extract_number(assertion)
+    tool_spans = _get_tool_spans(output)
+    actual = len(tool_spans)
+    score = min(max_calls / actual, 1.0) if actual > 0 else 1.0
+    return StepResult(
+        step_text=f"total tool calls should be at most {max_calls}",
+        score=score,
+        metric="latency",
+        detail=f"{actual}/{max_calls}",
+    )
+
+
+@step("total tool calls should be at least")
+def _min_tool_calls(assertion, args, output, _, __) -> StepResult:
+    min_calls = int(args[0]) if args else _extract_number(assertion)
+    tool_spans = _get_tool_spans(output)
+    actual = len(tool_spans)
+    score = min(actual / min_calls, 1.0) if min_calls > 0 else 1.0
+    return StepResult(
+        step_text=f"total tool calls should be at least {min_calls}",
+        score=score,
+        metric="coverage",
+        detail=f"{actual}/{min_calls}",
+    )
+
+
+@step("no tool calls should have failed")
+def _no_tool_failures(assertion, args, output, _, __) -> StepResult:
+    tool_spans = _get_tool_spans(output)
+    if not tool_spans:
+        return StepResult(
+            step_text="no tool calls should have failed",
+            score=1.0,
+            metric="quality",
+            detail="no tool calls recorded",
+        )
+    failed = [s for s in tool_spans if s.attributes.get("tool.status") == "error"]
+    total = len(tool_spans)
+    score = 1.0 - (len(failed) / total) if total > 0 else 1.0
+    failed_names = [s.attributes.get("tool.name", "?") for s in failed]
+    return StepResult(
+        step_text="no tool calls should have failed",
+        score=score,
+        metric="quality",
+        detail="" if not failed else f"failed: {failed_names}",
+    )
+
+
+@step("agent runs should be at most")
+def _max_agent_runs(assertion, args, output, _, __) -> StepResult:
+    max_runs = int(args[0]) if args else _extract_number(assertion)
+    agent_spans = _get_agent_spans(output)
+    actual = len(agent_spans)
+    score = min(max_runs / actual, 1.0) if actual > 0 else 1.0
+    return StepResult(
+        step_text=f"agent runs should be at most {max_runs}",
+        score=score,
+        metric="latency",
+        detail=f"{actual}/{max_runs}",
+    )
