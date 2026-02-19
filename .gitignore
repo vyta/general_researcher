@@ -1,0 +1,14 @@
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/*
+eval_results/
+src/eval_results/
+.DS_Store
+.tmp/*
+comparison_outcomes/*
+comparison_run/*

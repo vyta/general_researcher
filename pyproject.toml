@@ -1,0 +1,25 @@
+[project]
+name = "general-researcher"
+version = "0.1.0"
+description = "POC for comparing agent architectures for research tasks."
+requires-python = ">=3.10"
+dependencies = [
+  "openai>=1.0.0",
+  "azure-identity>=1.15.0",
+  "requests>=2.31.0",
+  "aiohttp>=3.9.0",
+  "python-dotenv>=1.0.0",
+  "pandas>=2.0.0",
+  "beautifulsoup4>=4.12.0",
+  "lxml>=5.0.0",
+  "pytest>=7.4.0",
+  "tenacity>=8.2.0",
+  "pydantic>=2.0.0",
+  "pyspellchecker>=0.8.1",
+  # Azure AI Foundry SDK
+  "azure-ai-projects==1.0.0",
+  "azure-ai-agents==1.0.0",
+  "azure-ai-evaluation>=1.0.0b1",
+  "azure-monitor-opentelemetry>=1.6.0",
+  "opentelemetry-instrumentation-openai-v2>=2.0.0b1",
+]
