@@ -33,9 +33,11 @@ class ResearchOutput:
 class EvalRunner:
     """Runs BDD scenarios against architectures and collects scored results."""
 
-    def __init__(self, output_dir: str = "eval_results", llm_judge: Optional[LLMJudge] = None):
+    def __init__(self, output_dir: str = "eval_results", llm_judge: Optional[LLMJudge] = None,
+                 azure_evaluators=None):
         self.output_dir = output_dir
         self.llm_judge = llm_judge
+        self.azure_evaluators = azure_evaluators
         import os
         os.makedirs(output_dir, exist_ok=True)
 
@@ -89,7 +91,8 @@ class EvalRunner:
         # Evaluate Then assertions
         step_results = []
         for assertion, args in scenario._thens:
-            sr = match_step(assertion, args, output, llm_judge=self.llm_judge)
+            sr = match_step(assertion, args, output, llm_judge=self.llm_judge,
+                           azure_evaluators=self.azure_evaluators)
             step_results.append(sr)
 
         return ScenarioResult(

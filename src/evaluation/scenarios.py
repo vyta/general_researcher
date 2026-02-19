@@ -26,6 +26,10 @@ def test_ai_legislation(s):
     s.then("the answer should be at least 200 characters", 200)
     s.then("sources should include", "GovInfo")
     s.then("documents retrieved should be at least", 3)
+    s.then("azure relevance score")
+    s.then("azure coherence score")
+    s.then("azure groundedness score")
+    s.then("azure fluency score")
     s.then("the answer should be", "comprehensive and well-sourced")
 
 
@@ -55,6 +59,9 @@ def test_epa_water(s):
     s.then("the answer should be at least 150 characters", 150)
     s.then("sources should include", "Federal Register")
     s.then("documents retrieved should be at least", 3)
+    s.then("azure relevance score")
+    s.then("azure coherence score")
+    s.then("azure groundedness score")
     s.then("the answer should be", "specific about regulatory details")
 
 

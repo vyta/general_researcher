@@ -24,20 +24,21 @@ if TYPE_CHECKING:
 
 # ── Step registry ─────────────────────────────────────────────────────
 
-_STEP_DEFS: list = []  # [(pattern, fn, is_llm)]
+_STEP_DEFS: list = []  # [(pattern, fn, is_llm, is_azure_eval)]
 
 
-def step(pattern: str, is_llm: bool = False):
+def step(pattern: str, is_llm: bool = False, is_azure_eval: bool = False):
     """Register a step definition."""
     def decorator(fn):
-        _STEP_DEFS.append((pattern, fn, is_llm))
+        _STEP_DEFS.append((pattern, fn, is_llm, is_azure_eval))
         return fn
     return decorator
 
 
-def match_step(assertion: str, args: tuple, output: "ResearchOutput", llm_judge=None) -> StepResult:
+def match_step(assertion: str, args: tuple, output: "ResearchOutput",
+               llm_judge=None, azure_evaluators=None) -> StepResult:
     """Find and execute a matching step definition."""
-    for pattern, fn, is_llm in _STEP_DEFS:
+    for pattern, fn, is_llm, is_azure_eval in _STEP_DEFS:
         if assertion.lower().startswith(pattern.lower()):
             if is_llm and llm_judge is None:
                 return StepResult(
@@ -47,7 +48,15 @@ def match_step(assertion: str, args: tuple, output: "ResearchOutput", llm_judge=
                     detail="Skipped (no LLM judge configured)",
                     is_llm_judged=True,
                 )
-            return fn(assertion, args, output, llm_judge)
+            if is_azure_eval and azure_evaluators is None:
+                return StepResult(
+                    step_text=_format_step(assertion, args),
+                    score=1.0,
+                    metric=_infer_metric(pattern),
+                    detail="Skipped (Azure evaluators not configured)",
+                    is_llm_judged=True,
+                )
+            return fn(assertion, args, output, llm_judge, azure_evaluators)
 
     return StepResult(
         step_text=_format_step(assertion, args),
@@ -62,10 +71,23 @@ def _format_step(assertion: str, args: tuple) -> str:
     return assertion
 
 
+def _infer_metric(pattern: str) -> str:
+    """Infer metric category from step pattern for skip messages."""
+    if "relevance" in pattern or "relevant" in pattern:
+        return "relevance"
+    if "coherence" in pattern or "coherent" in pattern:
+        return "quality"
+    if "groundedness" in pattern or "grounded" in pattern:
+        return "groundedness"
+    if "fluency" in pattern or "fluent" in pattern:
+        return "quality"
+    return "quality"
+
+
 # ── Relevance steps (keyword/topic matching) ──────────────────────────
 
 @step("the answer should mention")
-def _answer_should_mention(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepResult:
+def _answer_should_mention(assertion, args, output, _, __) -> StepResult:
     phrase = str(args[0]) if args else ""
     found = phrase.lower() in output.answer.lower()
     return StepResult(
@@ -77,7 +99,7 @@ def _answer_should_mention(assertion: str, args: tuple, output: "ResearchOutput"
 
 
 @step("the answer should not mention")
-def _answer_should_not_mention(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepResult:
+def _answer_should_not_mention(assertion, args, output, _, __) -> StepResult:
     phrase = str(args[0]) if args else ""
     found = phrase.lower() in output.answer.lower()
     return StepResult(
@@ -91,7 +113,7 @@ def _answer_should_not_mention(assertion: str, args: tuple, output: "ResearchOut
 # ── Groundedness steps (citations, evidence) ─────────────────────────
 
 @step("there should be at least")
-def _min_citations(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepResult:
+def _min_citations(assertion, args, output, _, __) -> StepResult:
     n = int(args[0]) if args else _extract_number(assertion)
     what = "citations" if "citation" in assertion.lower() else "items"
     actual = output.citations_count
@@ -106,7 +128,7 @@ def _min_citations(assertion: str, args: tuple, output: "ResearchOutput", _) -> 
 
 
 @step("the answer should be at least")
-def _min_length(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepResult:
+def _min_length(assertion, args, output, _, __) -> StepResult:
     n = int(args[0]) if args else _extract_number(assertion)
     actual = len(output.answer)
     score = min(actual / n, 1.0) if n > 0 else 1.0
@@ -121,7 +143,7 @@ def _min_length(assertion: str, args: tuple, output: "ResearchOutput", _) -> Ste
 # ── Coverage steps (source diversity, documents) ─────────────────────
 
 @step("sources should include")
-def _sources_include(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepResult:
+def _sources_include(assertion, args, output, _, __) -> StepResult:
     source = str(args[0]) if args else ""
     source_lower = source.lower().replace(" ", "_").replace(".", "")
     found = any(
@@ -137,7 +159,7 @@ def _sources_include(assertion: str, args: tuple, output: "ResearchOutput", _) -
 
 
 @step("documents retrieved should be at least")
-def _min_documents(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepResult:
+def _min_documents(assertion, args, output, _, __) -> StepResult:
     n = int(args[0]) if args else _extract_number(assertion)
     actual = output.documents_retrieved
     score = min(actual / n, 1.0) if n > 0 else 1.0
@@ -152,7 +174,7 @@ def _min_documents(assertion: str, args: tuple, output: "ResearchOutput", _) -> 
 # ── Latency steps ────────────────────────────────────────────────────
 
 @step("completion time should be under")
-def _max_time(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepResult:
+def _max_time(assertion, args, output, _, __) -> StepResult:
     threshold = float(args[0]) if args else _extract_number(assertion)
     actual = output.completion_time
     # Score scales linearly: 1.0 at 0s, 0.5 at threshold, 0.0 at 2x threshold
@@ -171,7 +193,7 @@ def _max_time(assertion: str, args: tuple, output: "ResearchOutput", _) -> StepR
 # ── Quality steps (LLM-judged) ───────────────────────────────────────
 
 @step("the answer should be", is_llm=True)
-def _answer_quality(assertion: str, args: tuple, output: "ResearchOutput", llm_judge) -> StepResult:
+def _answer_quality(assertion, args, output, llm_judge, _) -> StepResult:
     quality = str(args[0]) if args else ""
     result = llm_judge.judge_quality(output.answer, output.query, quality)
     return StepResult(
@@ -184,7 +206,7 @@ def _answer_quality(assertion: str, args: tuple, output: "ResearchOutput", llm_j
 
 
 @step("the answer should", is_llm=True)
-def _answer_should(assertion: str, args: tuple, output: "ResearchOutput", llm_judge) -> StepResult:
+def _answer_should(assertion, args, output, llm_judge, _) -> StepResult:
     criteria = str(args[0]) if args else assertion.replace("the answer should ", "")
     result = llm_judge.judge_criteria(output.answer, output.query, criteria)
     return StepResult(
@@ -201,3 +223,57 @@ def _answer_should(assertion: str, args: tuple, output: "ResearchOutput", llm_ju
 def _extract_number(text: str) -> int:
     match = re.search(r"\d+", text)
     return int(match.group()) if match else 0
+
+
+# ── Azure AI Evaluation steps ────────────────────────────────────────
+
+@step("azure relevance score", is_azure_eval=True)
+def _azure_relevance(assertion, args, output, _, azure_evaluators) -> StepResult:
+    result = azure_evaluators.evaluate_relevance(query=output.query, response=output.answer)
+    return StepResult(
+        step_text="azure relevance score",
+        score=result["score"],
+        metric="relevance",
+        detail=result["detail"],
+        is_llm_judged=True,
+    )
+
+
+@step("azure coherence score", is_azure_eval=True)
+def _azure_coherence(assertion, args, output, _, azure_evaluators) -> StepResult:
+    result = azure_evaluators.evaluate_coherence(query=output.query, response=output.answer)
+    return StepResult(
+        step_text="azure coherence score",
+        score=result["score"],
+        metric="quality",
+        detail=result["detail"],
+        is_llm_judged=True,
+    )
+
+
+@step("azure groundedness score", is_azure_eval=True)
+def _azure_groundedness(assertion, args, output, _, azure_evaluators) -> StepResult:
+    # Use the answer itself as context (citations inline)
+    context = args[0] if args else output.answer
+    result = azure_evaluators.evaluate_groundedness(
+        query=output.query, response=output.answer, context=context
+    )
+    return StepResult(
+        step_text="azure groundedness score",
+        score=result["score"],
+        metric="groundedness",
+        detail=result["detail"],
+        is_llm_judged=True,
+    )
+
+
+@step("azure fluency score", is_azure_eval=True)
+def _azure_fluency(assertion, args, output, _, azure_evaluators) -> StepResult:
+    result = azure_evaluators.evaluate_fluency(response=output.answer)
+    return StepResult(
+        step_text="azure fluency score",
+        score=result["score"],
+        metric="quality",
+        detail=result["detail"],
+        is_llm_judged=True,
+    )

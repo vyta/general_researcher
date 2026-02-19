@@ -59,6 +59,11 @@ def main():
         help="Disable LLM-judged assertions (faster, deterministic only)"
     )
     parser.add_argument(
+        "--no-azure-eval",
+        action="store_true",
+        help="Disable Azure AI Evaluation SDK evaluators"
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging"
@@ -99,6 +104,8 @@ def main():
     print(f"  Scenarios: {len(scenarios)}")
     if args.no_llm_judge:
         print("  LLM judge: disabled")
+    if args.no_azure_eval:
+        print("  Azure evaluators: disabled")
     
     # Initialize shared components
     data_sources = get_all_sources()
@@ -109,7 +116,18 @@ def main():
     if not args.no_llm_judge:
         llm_judge = LLMJudge(manager.openai_client, model=manager.fast_model)
     
-    runner = EvalRunner(output_dir=args.output_dir, llm_judge=llm_judge)
+    # Build Azure evaluators if enabled
+    azure_evaluators = None
+    if not args.no_azure_eval:
+        try:
+            from evaluation.azure_evaluators import AzureEvaluators
+            azure_evaluators = AzureEvaluators.from_env(credential=manager.credential)
+            print("  Azure evaluators: enabled")
+        except Exception as e:
+            print(f"  Azure evaluators: unavailable ({e})")
+
+    runner = EvalRunner(output_dir=args.output_dir, llm_judge=llm_judge,
+                        azure_evaluators=azure_evaluators)
     
     all_results = {}
     

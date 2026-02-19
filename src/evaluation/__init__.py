@@ -2,6 +2,7 @@
 from evaluation.dsl import scenario, get_all_scenarios, get_scenarios_by_category
 from evaluation.runner import EvalRunner
 from evaluation.llm_judge import LLMJudge
+from evaluation.azure_evaluators import AzureEvaluators
 
 __all__ = [
     "scenario",
@@ -9,4 +10,5 @@ __all__ = [
     "get_scenarios_by_category",
     "EvalRunner",
     "LLMJudge",
+    "AzureEvaluators",
 ]
