@@ -1,0 +1,282 @@
+# ─────────────────────────────────────────────────────────────────────
+# General Researcher — Promptfoo Evaluation Configuration
+# ─────────────────────────────────────────────────────────────────────
+#
+# Run:   npx promptfoo@latest eval
+# View:  npx promptfoo@latest view
+# Docs:  https://www.promptfoo.dev/docs/
+#
+# Prerequisites:
+#   - Node.js >= 18 (for Promptfoo CLI)
+#   - Python >= 3.10 with project dependencies installed
+#   - Environment variables configured (see .env):
+#       AZURE_AI_PROJECT_ENDPOINT, MODEL_DEPLOYMENT_NAME, etc.
+#
+# ─────────────────────────────────────────────────────────────────────
+
+description: "General Researcher — BDD Evaluation Scenarios"
+
+evaluateOptions:
+  pythonExecutable: ".venv/Scripts/python.exe"
+  maxConcurrency: 1
+
+prompts:
+  - "{{query}}"
+
+providers:
+  - id: "python:promptfoo_provider.py"
+    label: "single_agent"
+    config:
+      pythonExecutable: ".venv/Scripts/python.exe"
+
+# ── Reusable assertion anchors ───────────────────────────────────────
+# Each Python assertion is a single expression so Promptfoo can eval() it.
+# sys.path.insert returns None (falsy), so `or` passes through to the check.
+
+x-assertions:
+
+  latency-20: &latency-20
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_latency(output, context, 20)"
+    metric: latency/completion_time
+
+  latency-45: &latency-45
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_latency(output, context, 45)"
+    metric: latency/completion_time
+
+  citations-2: &citations-2
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_min_citations(output, context, 2)"
+    metric: groundedness/citations
+
+  citations-3: &citations-3
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_min_citations(output, context, 3)"
+    metric: groundedness/citations
+
+  length-150: &length-150
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_min_length(output, context, 150)"
+    metric: relevance/length
+
+  length-200: &length-200
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_min_length(output, context, 200)"
+    metric: relevance/length
+
+  docs-2: &docs-2
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_min_documents(output, context, 2)"
+    metric: coverage/documents
+
+  docs-3: &docs-3
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_min_documents(output, context, 3)"
+    metric: coverage/documents
+
+  source-govinfo: &source-govinfo
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_sources_include(output, context, 'GovInfo')"
+    metric: coverage/sources
+
+  source-federal-register: &source-federal-register
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_sources_include(output, context, 'Federal Register')"
+    metric: coverage/sources
+
+  source-datagov: &source-datagov
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_sources_include(output, context, 'Data.gov')"
+    metric: coverage/sources
+
+  tool-search-govinfo: &tool-search-govinfo
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_tool_called(output, context, 'search_govinfo')"
+    metric: coverage/tool_calls
+
+  tool-search-federal-register: &tool-search-federal-register
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_tool_called(output, context, 'search_federal_register')"
+    metric: coverage/tool_calls
+
+  no-tool-failures: &no-tool-failures
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_no_tool_failures(output, context)"
+    metric: quality/tool_reliability
+
+  min-tool-calls-1: &min-tool-calls-1
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_min_tool_calls(output, context, 1)"
+    metric: coverage/tool_calls
+
+  azure-relevance: &azure-relevance
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_azure_relevance(output, context)"
+    metric: relevance/azure
+
+  azure-coherence: &azure-coherence
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_azure_coherence(output, context)"
+    metric: quality/azure_coherence
+
+  azure-groundedness: &azure-groundedness
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_azure_groundedness(output, context)"
+    metric: groundedness/azure
+
+  azure-fluency: &azure-fluency
+    type: python
+    value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_azure_fluency(output, context)"
+    metric: quality/azure_fluency
+
+
+# ── Test Scenarios ───────────────────────────────────────────────────
+
+tests:
+
+  # ── Legislation ──────────────────────────────────────────────────
+
+  - description: "AI legislation search"
+    metadata:
+      category: legislation
+      scenario_id: ai_legislation
+    vars:
+      query: "What actions has Congress taken on artificial intelligence policy?"
+    assert:
+      - type: icontains
+        value: "artificial intelligence"
+        metric: relevance/keywords
+      - type: icontains
+        value: "Congress"
+        metric: relevance/keywords
+      - *length-200
+      - *latency-45
+      - *citations-3
+      - *source-govinfo
+      - *docs-3
+      - *tool-search-govinfo
+      - *no-tool-failures
+      - *min-tool-calls-1
+      - *azure-relevance
+      - *azure-coherence
+      - *azure-groundedness
+      - *azure-fluency
+      - type: python
+        value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_llm_quality(output, context, 'comprehensive and well-sourced, providing specific references to Congressional actions on AI policy')"
+        metric: quality/llm_rubric
+
+  - description: "Climate and energy legislation"
+    metadata:
+      category: legislation
+      scenario_id: climate_energy
+    vars:
+      query: "Legislation related to climate change and renewable energy"
+    assert:
+      - type: icontains
+        value: "climate"
+        metric: relevance/keywords
+      - type: icontains
+        value: "energy"
+        metric: relevance/keywords
+      - *length-150
+      - *latency-20
+      - *citations-2
+      - *docs-3
+      - type: python
+        value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_llm_quality(output, context, 'factual and grounded in cited sources, covering legislation related to climate change and renewable energy')"
+        metric: quality/llm_rubric
+
+  # ── Regulations ──────────────────────────────────────────────────
+
+  - description: "EPA water regulations"
+    metadata:
+      category: regulations
+      scenario_id: epa_water
+    vars:
+      query: "EPA regulations on clean water standards"
+    assert:
+      - type: icontains
+        value: "water"
+        metric: relevance/keywords
+      - type: icontains
+        value: "EPA"
+        metric: relevance/keywords
+      - *length-150
+      - *latency-20
+      - *citations-2
+      - *source-federal-register
+      - *docs-3
+      - *tool-search-federal-register
+      - *no-tool-failures
+      - *azure-relevance
+      - *azure-coherence
+      - *azure-groundedness
+      - type: python
+        value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_llm_quality(output, context, 'specific about regulatory details, citing particular EPA regulations on clean water standards')"
+        metric: quality/llm_rubric
+
+  - description: "Cybersecurity regulations"
+    metadata:
+      category: regulations
+      scenario_id: cybersecurity_regs
+    vars:
+      query: "What federal regulations were issued regarding cybersecurity?"
+    assert:
+      - type: icontains
+        value: "cybersecurity"
+        metric: relevance/keywords
+      - *length-150
+      - *latency-20
+      - *citations-2
+      - *docs-2
+      - type: python
+        value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_llm_quality(output, context, 'comprehensive about federal cybersecurity requirements, covering key regulatory frameworks and agencies')"
+        metric: quality/llm_rubric
+
+  # ── Datasets ─────────────────────────────────────────────────────
+
+  - description: "Public health datasets"
+    metadata:
+      category: datasets
+      scenario_id: public_health_data
+    vars:
+      query: "What government datasets are available about public health?"
+    assert:
+      - type: icontains
+        value: "health"
+        metric: relevance/keywords
+      - type: icontains
+        value: "data"
+        metric: relevance/keywords
+      - *length-150
+      - *latency-20
+      - *citations-2
+      - *source-datagov
+      - *docs-3
+      - type: python
+        value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_llm_quality(output, context, 'informative about available data resources, listing specific government datasets related to public health')"
+        metric: quality/llm_rubric
+
+  # ── Policy ───────────────────────────────────────────────────────
+
+  - description: "Immigration policy changes"
+    metadata:
+      category: policy
+      scenario_id: immigration_policy
+    vars:
+      query: "Recent immigration policy changes and border security"
+    assert:
+      - type: icontains
+        value: "immigration"
+        metric: relevance/keywords
+      - type: icontains
+        value: "border"
+        metric: relevance/keywords
+      - *length-150
+      - *latency-20
+      - *citations-2
+      - *docs-2
+      - type: python
+        value: "__import__('sys').path.insert(0,'.') or __import__('promptfoo_helpers').check_llm_quality(output, context, 'balanced and evidence-based, covering recent immigration policy changes and border security measures with citations')"
+        metric: quality/llm_rubric

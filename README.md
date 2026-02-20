@@ -68,6 +68,46 @@ make eval-all          # all 6 architectures
 make compare QUERY='AI legislation'  # parallel comparison
 ```
 
+
+## Promptfoo evaluation
+
+In addition to the BDD eval framework, the project includes a [Promptfoo](https://www.promptfoo.dev/) integration that runs the same 6 scenarios through a standardised assertion pipeline. This gives you a reproducible, CLI-driven eval with per-metric scoring and an HTML report. Uses government research as the problem domain — querying public APIs (GovInfo, Federal Register, Data.gov) through different agent compositions built on Microsoft Foundry Agents.
+
+### How it works
+
+```
+promptfooconfig.yaml          ← scenarios, assertions, provider config
+promptfoo_provider.py         ← custom Python provider wrapping SingleAgentOrchestrator
+promptfoo_helpers.py          ← assertion check functions (GradingResult dicts)
+.promptfoo_cache/             ← per-query metadata cache (latency, citations, sources, tool spans)
+```
+
+1. **Provider** — `promptfoo_provider.py` initialises the `SingleAgentOrchestrator`, runs the research query, and writes metadata (completion time, citation count, sources used, tool-call spans) to `.promptfoo_cache/`.
+2. **Assertions** — each scenario has a list of assertions that read the cached metadata and return `{ pass, score, reason }`. Assertions are defined as YAML anchors in `promptfooconfig.yaml` and call helper functions from `promptfoo_helpers.py`.
+3. **Metrics** — assertions are tagged with metric names so results can be grouped:
+
+| Category | Assertions | Source |
+|----------|-----------|--------|
+| **relevance** | `icontains` keywords, `check_min_length`, `check_azure_relevance` | built-in + Azure AI |
+| **latency** | `check_latency` (configurable threshold) | cached metadata |
+| **groundedness** | `check_min_citations`, `check_azure_groundedness` | cached metadata + Azure AI |
+| **coverage** | `check_sources_include`, `check_min_documents`, `check_tool_called`, `check_min_tool_calls` | cached metadata |
+| **quality** | `check_azure_coherence`, `check_azure_fluency`, `check_llm_quality` | Azure AI + LLM judge |
+
+
+### Running
+
+```bash
+# Prerequisites: Node.js >= 18, Python venv with project deps, az login
+npx promptfoo@latest eval            # run all 6 scenarios
+npx promptfoo@latest eval --no-cache # force re-run (skip Promptfoo cache)
+npx promptfoo@latest view            # open interactive web UI on localhost
+npx promptfoo@latest eval --output output.html   # export HTML report
+npx promptfoo@latest eval --output output.json   # export JSON results
+```
+
+> **Note:** The GovInfo API has strict rate limits. If you see 429 errors, wait a few minutes before re-running. Promptfoo caches provider outputs by default, so subsequent runs only re-evaluate assertions unless you pass `--no-cache`.
+
 ## Project layout
 
 ```
@@ -80,6 +120,9 @@ src/
 ├── main.py          # CLI
 ├── eval.py          # Eval CLI
 └── run_architecture.py
+promptfoo_provider.py    # Promptfoo custom provider (SingleAgentOrchestrator)
+promptfoo_helpers.py     # Assertion helper functions for Promptfoo
+promptfooconfig.yaml     # Promptfoo evaluation config (scenarios + assertions)
 ```
 
 ## Environment
@@ -90,4 +133,4 @@ MODEL_DEPLOYMENT_NAME=gpt-4o
 MODEL_DEPLOYMENT_NAME_FAST=gpt-4o-mini
 ```
 
-Requires Python 3.10+, an Azure AI Foundry project with model deployments, and `az login`.
+Requires Python 3.10+, Node.js 18+ (for Promptfoo), an Azure AI Foundry project with model deployments, and `az login`.
