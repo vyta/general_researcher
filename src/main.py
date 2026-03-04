@@ -66,6 +66,37 @@ def main():
         action="store_true",
         help="Don't delete agents after run (inspect them in Foundry portal)"
     )
+    parser.add_argument(
+        "--acp-transport",
+        type=str,
+        choices=["stdio", "tcp"],
+        default="stdio",
+        help="ACP transport mode (default: stdio)"
+    )
+    parser.add_argument(
+        "--acp-host",
+        type=str,
+        default="localhost",
+        help="ACP server hostname for TCP transport (default: localhost)"
+    )
+    parser.add_argument(
+        "--acp-port",
+        type=int,
+        default=3000,
+        help="ACP server port for TCP transport (default: 3000)"
+    )
+    parser.add_argument(
+        "--acp-executable",
+        type=str,
+        default="copilot",
+        help="ACP agent executable for stdio transport (default: copilot)"
+    )
+    parser.add_argument(
+        "--acp-cwd",
+        type=str,
+        default=None,
+        help="Working directory for the ACP agent subprocess (default: current directory)"
+    )
     
     args = parser.parse_args()
 
@@ -96,16 +127,30 @@ def main():
     print(f"GENERAL RESEARCHER POC - {arch_info['name']}")
     print("=" * 80)
     
-    # Initialize components
-    data_sources = get_all_sources(govinfo_api_key=args.govinfo_api_key)
-    manager = FoundryAgentManager(govinfo_api_key=args.govinfo_api_key, keep_agents=args.keep_agents)
-    
-    # Create agent/orchestrator
-    with manager:
-        orchestrator = arch_info["class"](manager, data_sources)
-        
-        # Execute research
-        result = orchestrator.research(args.query, max_results_per_source=args.max_results)
+    # Initialize components — branch on architecture type
+    is_acp = arch_info.get("external", False)
+
+    if is_acp:
+        from agents.smart_inventory_advisor import ACPAgentConfig
+        acp_config = ACPAgentConfig(
+            name=arch_info["name"],
+            transport=args.acp_transport,
+            executable=args.acp_executable,
+            host=args.acp_host,
+            port=args.acp_port,
+            cwd=args.acp_cwd,
+        )
+        orchestrator = arch_info["class"](acp_config=acp_config)
+        try:
+            result = orchestrator.research(args.query, max_results_per_source=args.max_results)
+        finally:
+            orchestrator.close()
+    else:
+        data_sources = get_all_sources(govinfo_api_key=args.govinfo_api_key)
+        manager = FoundryAgentManager(govinfo_api_key=args.govinfo_api_key, keep_agents=args.keep_agents)
+        with manager:
+            orchestrator = arch_info["class"](manager, data_sources)
+            result = orchestrator.research(args.query, max_results_per_source=args.max_results)
     
     # Display results
     print("\n" + "=" * 80)

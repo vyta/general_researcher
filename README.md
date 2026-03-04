@@ -156,11 +156,62 @@ make compare QUERY='AI legislation'  # parallel comparison
 ```
 
 Direct CLI with filters:
+
 ```bash
 uv run src/eval.py -a single_agent researcher_critic    # compare two architectures
 uv run src/eval.py -a single_agent -c legislation       # filter by category
 uv run src/eval.py -a single_agent --no-llm-judge --no-azure-eval  # fast dev mode
 ```
+
+Add `-v` (`--verbose`) to see the agent's answers. In verbose mode, each scenario prints a 300-character answer preview in the terminal and the full answer text is included in the saved JSON results file.
+
+```bash
+uv run src/eval.py -a acp_agent --no-azure-eval -v      # shows answer preview + saves to JSON
+```
+
+### Smart Inventory Advisor (ACP agent)
+
+The Smart Inventory Advisor is a GitHub Copilot custom agent that investigates material substitutions in an industrial inventory knowledge graph. Unlike the Foundry-based architectures above, it runs via Copilot CLI and communicates over the [Agent Client Protocol (ACP)](https://agentclientprotocol.github.io/).
+
+The agent definition lives at `.github/agents/material-substitution.agent.md` in the parent repo and uses MCP servers (RDF Explorer, Databricks, PDF Reader) for data access.
+
+**Prerequisites:**
+
+* [GitHub Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) installed and authenticated
+* `--acp-cwd` pointed at the repo root containing `.github/agents/material-substitution.agent.md` (e.g. /Users/eugenefedorenko/work/energy-frontier-firm-haliburton)
+
+**Run evaluation:**
+
+```bash
+# stdio mode (default) — spawns Copilot CLI as a subprocess
+uv run src/eval.py -a acp_agent \
+  --acp-cwd /path/to/energy-frontier-firm-haliburton-repo \
+  --no-llm-judge --no-azure-eval -v
+
+# TCP mode — connect to an already-running ACP server
+# Terminal 1: start the server from the repo root
+copilot --acp --port 3000 --agent material-substitution --allow-all
+# Terminal 2: run the eval
+uv run src/eval.py -a acp_agent \
+  --acp-transport tcp --acp-port 3000 \
+  --acp-cwd /path/to/energy-frontier-firm-haliburton-repo \
+  --no-llm-judge --no-azure-eval -v
+
+# With LLM judge (requires AZURE_AI_PROJECT_ENDPOINT in .env)
+uv run src/eval.py -a acp_agent \
+  --acp-cwd /path/to/energy-frontier-firm-haliburton-repo \
+  --no-azure-eval -v
+```
+
+**Single query via CLI:**
+
+```bash
+uv run src/main.py -a acp_agent \
+  --acp-cwd /path/to/parent-repo \
+  --query "What materials can substitute for O-ring 10001?"
+```
+
+The ACP eval template skips tool-introspection assertions (the agent's internals are opaque) and focuses on answer quality: keyword relevance, minimum length, and LLM-judged quality criteria. See [`MATERIAL_SUBSTITUTION_CASES`](src/evaluation/scenarios.py) for the evaluated scenarios.
 
 ## Project layout
 

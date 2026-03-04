@@ -11,8 +11,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-JUDGE_SYSTEM_PROMPT = """You are an evaluation judge for a government research agent.
-You will be given a research query, the agent's answer, and a quality criterion.
+JUDGE_SYSTEM_PROMPT = """You are an evaluation judge for an AI agent.
+You will be given a query, the agent's answer, and a quality criterion.
 Evaluate whether the answer meets the criterion on a scale of 0.0 to 1.0.
 
 Respond with JSON only:

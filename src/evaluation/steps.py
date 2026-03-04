@@ -13,10 +13,13 @@ Metric categories:
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, List, Optional, TYPE_CHECKING
 
 from .dsl import StepResult
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .runner import ResearchOutput
@@ -619,8 +622,6 @@ def _validate_patterns():
     
     Warnings are issued for informational purposes only and do not block execution.
     """
-    import warnings as warn_module
-    
     patterns = [p for p, _, _, _ in _STEP_DEFS]
     warnings = []
     
@@ -639,7 +640,7 @@ def _validate_patterns():
         seen = set()
         for warning in warnings:
             if warning not in seen:
-                warn_module.warn(warning, RuntimeWarning, stacklevel=2)
+                logger.debug(warning)
                 seen.add(warning)
 
 

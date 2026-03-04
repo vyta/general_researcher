@@ -35,10 +35,11 @@ class EvalRunner:
     """Runs BDD scenarios against architectures and collects scored results."""
 
     def __init__(self, output_dir: str = "eval_results", llm_judge: Optional[LLMJudge] = None,
-                 azure_evaluators=None):
+                 azure_evaluators=None, verbose: bool = False):
         self.output_dir = output_dir
         self.llm_judge = llm_judge
         self.azure_evaluators = azure_evaluators
+        self.verbose = verbose
         import os
         os.makedirs(output_dir, exist_ok=True)
 
@@ -154,7 +155,7 @@ class EvalRunner:
             sr = self.run_scenario(sc, architecture, architecture_name)
             results.append(sr)
 
-            _print_scenario_result(sr)
+            _print_scenario_result(sr, verbose=self.verbose)
 
         return results
 
@@ -242,6 +243,9 @@ class EvalRunner:
                     "time": round(r.completion_time, 2),
                     "documents": r.documents_retrieved,
                     "citations": r.citations_count,
+                    **({
+                        "answer": r.answer,
+                    } if self.verbose else {}),
                     "metric_scores": {
                         k: round(v, 3) for k, v in r.scores_by_metric().items()
                     },
@@ -303,7 +307,7 @@ def _score_bar(score: float, width: int = 10) -> str:
     return f"[{'█' * filled}{'░' * (width - filled)}]"
 
 
-def _print_scenario_result(sr: ScenarioResult):
+def _print_scenario_result(sr: ScenarioResult, verbose: bool = False):
     """Print a single scenario result with step scores grouped by stage."""
     status = "✓" if sr.passed else "✗"
     print(f"    {status} {sr.scenario_name} — score: {sr.overall_score:.2f} "
@@ -323,3 +327,9 @@ def _print_scenario_result(sr: ScenarioResult):
         cat = f"[{s.metric}]" if s.metric else ""
         detail = f" — {s.detail}" if s.detail else ""
         print(f"      {icon} {s.score:.1f}  {cat:<15} {s.step_text}{suffix}{detail}")
+
+    if verbose and sr.answer:
+        preview = sr.answer.replace("\n", " ").strip()
+        if len(preview) > 300:
+            preview = preview[:300] + "…"
+        print(f"      ── answer ──\n      {preview}")

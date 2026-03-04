@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 # Add parent directory to path to allow absolute imports from src
 sys.path.insert(0, str(Path(__file__).parent))
 
+from contextlib import nullcontext
+
 from data_sources import get_all_sources
 from agents.client import FoundryAgentManager
 from architectures import ARCHITECTURES
@@ -73,6 +75,37 @@ def main():
         action="store_true",
         help="Keep agents in Foundry after evaluation"
     )
+    parser.add_argument(
+        "--acp-cwd",
+        type=str,
+        default=None,
+        help="Working directory for the ACP agent subprocess"
+    )
+    parser.add_argument(
+        "--acp-transport",
+        type=str,
+        choices=["stdio", "tcp"],
+        default="stdio",
+        help="ACP transport mode (default: stdio)"
+    )
+    parser.add_argument(
+        "--acp-executable",
+        type=str,
+        default="copilot",
+        help="ACP agent executable for stdio transport (default: copilot)"
+    )
+    parser.add_argument(
+        "--acp-host",
+        type=str,
+        default="localhost",
+        help="ACP server hostname for TCP transport (default: localhost)"
+    )
+    parser.add_argument(
+        "--acp-port",
+        type=int,
+        default=3000,
+        help="ACP server port for TCP transport (default: 3000)"
+    )
     
     args = parser.parse_args()
     
@@ -82,7 +115,8 @@ def main():
     
     # Determine which architectures to evaluate
     if "all" in args.architecture:
-        arch_keys = list(ARCHITECTURES.keys())
+        # Exclude external (ACP) architectures from "all" — they need a running server
+        arch_keys = [k for k, v in ARCHITECTURES.items() if not v.get("external")]
     else:
         arch_keys = args.architecture
     
@@ -107,18 +141,54 @@ def main():
     if args.no_azure_eval:
         print("  Azure evaluators: disabled")
     
-    # Initialize shared components
-    data_sources = get_all_sources()
-    manager = FoundryAgentManager(keep_agents=args.keep_agents)
+    # Initialize shared components — only create Foundry manager if needed
+    needs_foundry = any(
+        not ARCHITECTURES[k].get("external") for k in arch_keys
+    )
+
+    manager = None
+    data_sources = None
+    if needs_foundry:
+        data_sources = get_all_sources()
+        manager = FoundryAgentManager(keep_agents=args.keep_agents)
     
     # Build LLM judge if enabled
     llm_judge = None
-    if not args.no_llm_judge:
+    if not args.no_llm_judge and manager is not None:
         llm_judge = LLMJudge(manager.openai_client, model=manager.fast_model)
+    elif not args.no_llm_judge:
+        # Fallback: create AzureOpenAI client from env without full Foundry manager
+        try:
+            import re
+            from openai import AzureOpenAI
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "").rstrip("/")
+            if not endpoint:
+                raise ValueError("AZURE_AI_PROJECT_ENDPOINT not set")
+            # AI Foundry: https://{resource}.services.ai.azure.com/...
+            # Classic Azure OpenAI: https://{resource}.openai.azure.com/...
+            m = re.match(r"(https://[^/]+\.(?:services\.ai|openai)\.azure\.com)", endpoint)
+            if not m:
+                raise ValueError(f"Unrecognized endpoint format: {endpoint}")
+            resource_host = m.group(1)
+            token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+            )
+            client = AzureOpenAI(
+                azure_endpoint=resource_host,
+                azure_ad_token_provider=token_provider,
+                api_version="2025-03-01-preview",
+            )
+            model = os.environ.get("MODEL_DEPLOYMENT_NAME_FAST",
+                                   os.environ.get("MODEL_DEPLOYMENT_NAME", "gpt-4o"))
+            llm_judge = LLMJudge(client, model=model)
+            print(f"  LLM judge: enabled (Azure OpenAI, {model})")
+        except Exception as e:
+            print(f"  LLM judge: skipped ({e})")
     
     # Build Azure evaluators if enabled
     azure_evaluators = None
-    if not args.no_azure_eval:
+    if not args.no_azure_eval and manager is not None:
         try:
             from evaluation.azure_evaluators import AzureEvaluators
             azure_evaluators = AzureEvaluators.from_env(credential=manager.credential)
@@ -127,11 +197,12 @@ def main():
             print(f"  Azure evaluators: unavailable ({e})")
 
     runner = EvalRunner(output_dir=args.output_dir, llm_judge=llm_judge,
-                        azure_evaluators=azure_evaluators)
+                        azure_evaluators=azure_evaluators, verbose=args.verbose)
     
     all_results = {}
+    acp_orchestrators = []  # track for cleanup
     
-    with manager:
+    with manager if manager else nullcontext():
         for arch_key in arch_keys:
             arch_info = ARCHITECTURES[arch_key]
             print(f"\n{'=' * 70}")
@@ -146,12 +217,32 @@ def main():
             
             print(f"  Scenarios: {len(arch_scenarios)}")
             
-            architecture = arch_info["class"](manager, data_sources)
+            if arch_info.get("external"):
+                from agents.smart_inventory_advisor import ACPAgentConfig
+                acp_config = ACPAgentConfig(
+                    name=arch_info["name"],
+                    transport=args.acp_transport,
+                    executable=args.acp_executable,
+                    host=args.acp_host,
+                    port=args.acp_port,
+                    cwd=args.acp_cwd,
+                )
+                architecture = arch_info["class"](acp_config=acp_config)
+                acp_orchestrators.append(architecture)
+            else:
+                architecture = arch_info["class"](manager, data_sources)
             results = runner.run_all(architecture, arch_key, scenarios=arch_scenarios)
             
             runner.print_summary(results, arch_key)
             runner.save_results(results, arch_key)
             all_results[arch_key] = results
+    
+    # Cleanup ACP connections
+    for orch in acp_orchestrators:
+        try:
+            orch.close()
+        except Exception:
+            pass
     
     # Print comparison if multiple architectures
     if len(arch_keys) > 1:

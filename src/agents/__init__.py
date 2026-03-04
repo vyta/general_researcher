@@ -19,6 +19,10 @@ from agents.critic import create_critic, CRITIC_INSTRUCTIONS
 from agents.synthesizer import create_synthesizer, SYNTHESIZER_INSTRUCTIONS
 from agents.planner import create_planner, PLANNER_INSTRUCTIONS
 from agents.source_worker import create_source_worker, SOURCE_WORKER_INSTRUCTIONS
+from agents.smart_inventory_advisor import (
+    ACPAgentConfig,
+    SMART_INVENTORY_ADVISOR,
+)
 
 __all__ = [
     "FoundryAgentManager",
@@ -32,4 +36,6 @@ __all__ = [
     "SYNTHESIZER_INSTRUCTIONS",
     "PLANNER_INSTRUCTIONS",
     "SOURCE_WORKER_INSTRUCTIONS",
+    "ACPAgentConfig",
+    "SMART_INVENTORY_ADVISOR",
 ]

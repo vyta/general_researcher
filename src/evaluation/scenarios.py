@@ -18,6 +18,7 @@ Import this module to register all scenarios before running evals.
 from .dsl import scenario, template
 
 MAX_COMPLETION_TIME = 20  # seconds
+ACP_TIMEOUT = 120  # ACP agents may be slower (subprocess + MCP tools)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -260,6 +261,26 @@ def hybrid_p2p(s, data):
     AssertionGroup(s).synthesis_expectations(data)
 
 
+# ── ACP Agent ─────────────────────────────────────────────────────────
+
+@template("acp agent", category="acp_agent")
+def acp_agent(s, data):
+    """ACP agent: answer quality only (internals are opaque)."""
+    s.given("a query", data["query"])
+
+    s.when("the agent researches this query")
+    # No tool-introspection assertions — ACP agent internals are opaque
+
+    s.when("the agent synthesizes the results")
+    s.then("completion time should be under", data.get("max_time", ACP_TIMEOUT))
+    for term in data["expected_terms"]:
+        s.then("the answer should mention", term)
+    if data.get("min_citations", 0) > 0:
+        s.then("there should be at least 2 citations", data.get("min_citations", 1))
+    s.then("the answer should be at least 150 characters", data.get("min_length", 100))
+    s.then("the answer should be", data["quality_criteria"])
+
+
 LEGISLATION_CASES = [
     {
         "query": "What actions has Congress taken on artificial intelligence policy?",
@@ -420,6 +441,39 @@ MULTI_SOURCE_CASES = [
     },
 ]
 
+MATERIAL_SUBSTITUTION_CASES = [
+    {
+        "query": "What materials can substitute for O-ring 10001?",
+        "expected_terms": ["substitute", "O-ring"],
+        "quality_criteria": (
+            "lists valid substitute materials with confidence scores "
+            "and explains context-dependent constraints"
+        ),
+        "min_length": 100,
+    },
+    {
+        "query": "List all slow-moving inventory items.",
+        "expected_terms": ["slow-moving"],
+        "quality_criteria": (
+            "returns a structured list of materials flagged as "
+            "slow-moving with on-hand quantities"
+        ),
+        "min_length": 80,
+    },
+    {
+        "query": (
+            "Can I use material 10003 (NBR) instead of 10001 (Viton) "
+            "in the WIX 51515 filter?"
+        ),
+        "expected_terms": ["substitut"],  # matches substitute/substitution
+        "quality_criteria": (
+            "addresses material compatibility with specific reasoning, "
+            "mentions temperature or operating constraints if applicable"
+        ),
+        "min_length": 150,
+    },
+]
+
 # Merge all cases into one dataset
 ALL_CASES = (LEGISLATION_CASES + REGULATION_CASES + DATASET_CASES + POLICY_CASES
              + AMBIGUOUS_CASES + MULTI_PART_CASES + TEMPORAL_CASES
@@ -439,3 +493,6 @@ hybrid_p2p.cases(ALL_CASES)
 
 # Code execution architecture gets analytical cases (quantitative queries)
 single_agent_code.cases(ANALYTICAL_CASES)
+
+# ACP agent gets domain-specific material-substitution cases
+acp_agent.cases(MATERIAL_SUBSTITUTION_CASES)

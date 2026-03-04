@@ -22,4 +22,6 @@ dependencies = [
   "azure-ai-evaluation>=1.0.0b1",
   "azure-monitor-opentelemetry>=1.6.0",
   "opentelemetry-instrumentation-openai-v2>=2.0.0b1",
+  # ACP (Agent Client Protocol) SDK
+  "agent-client-protocol>=0.8.1",
 ]

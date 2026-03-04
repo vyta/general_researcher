@@ -8,6 +8,7 @@ from architectures.single_agent import SingleAgentOrchestrator
 from architectures.single_agent_code import SingleAgentCodeOrchestrator
 from architectures.plan_and_execute import PlanAndExecuteOrchestrator
 from architectures.hybrid_p2p import HybridP2PHierarchical
+from architectures.acp_agent import ACPAgentOrchestrator
 
 # Canonical registry of all architectures
 ARCHITECTURES = {
@@ -46,6 +47,12 @@ ARCHITECTURES = {
         "class": HybridP2PHierarchical,
         "emoji": "🔗",
     },
+    "acp_agent": {
+        "name": "ACP Agent (Smart Inventory Advisor)",
+        "class": ACPAgentOrchestrator,
+        "emoji": "🔌",
+        "external": True,  # requires a running ACP server
+    },
 }
 
 __all__ = [
@@ -57,5 +64,6 @@ __all__ = [
     'SupervisorWorkerOrchestrator',
     'PlanAndExecuteOrchestrator',
     'HybridP2PHierarchical',
+    'ACPAgentOrchestrator',
     'ARCHITECTURES',
 ]
